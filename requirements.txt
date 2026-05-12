@@ -1,0 +1,8 @@
+streamlit
+librosa
+tensorflow-cpu
+xgboost
+joblib
+matplotlib
+soundfile
+numpy
