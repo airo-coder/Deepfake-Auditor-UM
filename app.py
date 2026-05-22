@@ -31,20 +31,6 @@ st.set_page_config(page_title="Deepfake Auditor V4", page_icon="🛡️", layout
 st.title("🎙️ Multi-Layer Audio Deepfake Authentication Dashboard")
 st.write("Extract 60-D dynamic spectral fingerprints to validate biological speech vs. synthetic anomalies.")
 
-# --- MAIN PERFORMANCE OVERVIEW PANEL (Replaced the Sidebar) ---
-st.markdown("### 📊 System Empirical Validation Metrics")
-met_c1, met_c2, met_c3, met_c4 = st.columns(4)
-with met_c1:
-    st.metric(label="Overall Testing Accuracy", value="95.0%")
-with met_c2:
-    st.metric(label="Area Under Curve (ROC-AUC)", value="0.9848")
-with met_c3:
-    st.metric(label="Balanced Human F1-Score", value="0.95")
-with met_c4:
-    st.metric(label="Balanced AI F1-Score", value="0.95")
-
-st.caption("Engine Specifications: V4-Robust | Architecture: Hybrid CNN-BiLSTM + Self Attention with Stacking XGBoost Refiner")
-st.markdown("---")
 
 # 2. Load Models Safely
 @st.cache_resource
