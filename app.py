@@ -328,13 +328,21 @@ def _detect_gemini_model(client):
 
 def _call_gemini(client, prompt):
     """Call Gemini using the auto-detected model. Returns (text, error)."""
+    # Check session cache first to avoid redundant API calls
+    if 'gemini_cache' not in st.session_state:
+        st.session_state['gemini_cache'] = {}
+    if prompt in st.session_state['gemini_cache']:
+        return st.session_state['gemini_cache'][prompt], None
+
     model_name = _detect_gemini_model(client)
     try:
         response = client.models.generate_content(
             model=model_name,
             contents=prompt
         )
-        return response.text.strip(), None
+        res_text = response.text.strip()
+        st.session_state['gemini_cache'][prompt] = res_text
+        return res_text, None
     except Exception as e:
         # If detected model fails, clear cache and try once more with re-detection
         st.session_state.pop('gemini_model_name', None)
@@ -344,7 +352,9 @@ def _call_gemini(client, prompt):
                 model=model_name,
                 contents=prompt
             )
-            return response.text.strip(), None
+            res_text = response.text.strip()
+            st.session_state['gemini_cache'][prompt] = res_text
+            return res_text, None
         except Exception as e2:
             return None, f"Model '{model_name}': {type(e2).__name__}: {e2}"
 
@@ -535,9 +545,16 @@ if uploaded_file:
     st.audio(audio_bytes)
     audio_data, sr = librosa.load(io.BytesIO(audio_bytes), sr=16000)
 
+    # Detect file change to reset audit results and cache
+    file_key = uploaded_file.name + "_" + str(len(audio_bytes))
+    if 'current_file_key' not in st.session_state or st.session_state['current_file_key'] != file_key:
+        st.session_state['current_file_key'] = file_key
+        st.session_state['audit_results'] = None
+        st.session_state['gemini_cache'] = {}
+        st.session_state['gemini_last_error'] = None
+
     if st.button("🚀 RUN COMPREHENSIVE BIOMETRIC SPEECH AUDIT", use_container_width=True):
         with st.spinner("🔬 Extracting spectral features, running neural inference, computing acoustic diagnostics..."):
-
             # ── Pipeline Execution ──
             features = extract_60d_features(audio_data)
             deep_feats = feat_ext.predict(np.expand_dims(features, axis=0), verbose=0)
@@ -545,17 +562,45 @@ if uploaded_file:
             metrics = compute_explainable_metrics(audio_data, sr=16000)
             heuristic_prob, audit_details = compute_heuristic_suspicion(metrics)
             ensemble_prob = 0.65 * model_prob + 0.35 * heuristic_prob
-            is_ai = ensemble_prob > st_sensitivity
-            verdict_label = "SPOOFED / AI-GENERATED" if is_ai else "BONAFIDE / HUMAN"
+            
+            # Save results to session state
+            st.session_state['audit_results'] = {
+                'features': features,
+                'deep_feats': deep_feats,
+                'model_prob': model_prob,
+                'metrics': metrics,
+                'heuristic_prob': heuristic_prob,
+                'audit_details': audit_details,
+                'ensemble_prob': ensemble_prob,
+                'audio_data': audio_data
+            }
+            # Clear previous errors
+            st.session_state['gemini_last_error'] = None
 
-            # ── Generate Gemini reasoning (if available) ──
-            gemini_verdict_text = None
-            if gemini_client:
-                with st.spinner("🤖 Gemini is analyzing your audio forensics data..."):
-                    gemini_verdict_text = generate_gemini_verdict_reasoning(
-                        gemini_client, verdict_label, ensemble_prob, model_prob,
-                        heuristic_prob, metrics, audit_details
-                    )
+    # Render dashboard if results exist in session state
+    if st.session_state.get('audit_results') is not None:
+        results = st.session_state['audit_results']
+        features = results['features']
+        deep_feats = results['deep_feats']
+        model_prob = results['model_prob']
+        metrics = results['metrics']
+        heuristic_prob = results['heuristic_prob']
+        audit_details = results['audit_details']
+        ensemble_prob = results['ensemble_prob']
+        audio_data = results['audio_data']
+        
+        # Dynamic verdict evaluation based on threshold slider
+        is_ai = ensemble_prob > st_sensitivity
+        verdict_label = "SPOOFED / AI-GENERATED" if is_ai else "BONAFIDE / HUMAN"
+        
+        # ── Retrieve/Generate Gemini reasoning (if available) ──
+        gemini_verdict_text = None
+        if gemini_client:
+            with st.spinner("🤖 Gemini is analyzing your audio forensics data..."):
+                gemini_verdict_text = generate_gemini_verdict_reasoning(
+                    gemini_client, verdict_label, ensemble_prob, model_prob,
+                    heuristic_prob, metrics, audit_details
+                )
 
         # ── UI Tabs ──
         tab_verdict, tab_explain, tab_metrics, tab_neural = st.tabs([
