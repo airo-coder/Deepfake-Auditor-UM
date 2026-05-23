@@ -290,23 +290,63 @@ def compute_heuristic_suspicion(metrics):
 # ─────────────────────────────────────────────────────────
 # 6. Gemini AI Dynamic Analysis Engine
 # ─────────────────────────────────────────────────────────
-# Try multiple model names in case one is unavailable for the user's region/key
-GEMINI_MODELS = ["gemini-2.0-flash", "gemini-1.5-flash", "gemini-1.5-flash-latest"]
+def _detect_gemini_model(client):
+    """Auto-detect a working Gemini model by listing available models."""
+    # Check session cache first
+    if 'gemini_model_name' in st.session_state and st.session_state['gemini_model_name']:
+        return st.session_state['gemini_model_name']
+
+    # Preferred model names in priority order
+    preferred = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash",
+                 "gemini-2.5-pro", "gemini-2.0-flash-001"]
+    try:
+        available = [m.name for m in client.models.list()]
+        # Try preferred models first
+        for pref in preferred:
+            if pref in available or f"models/{pref}" in available:
+                st.session_state['gemini_model_name'] = pref
+                return pref
+        # Fallback: pick first model that supports generateContent
+        for m in client.models.list():
+            name = m.name.replace("models/", "") if m.name.startswith("models/") else m.name
+            if "gemini" in name.lower() and "flash" in name.lower():
+                st.session_state['gemini_model_name'] = name
+                return name
+        # Last resort: just use the first gemini model
+        for m in client.models.list():
+            name = m.name.replace("models/", "") if m.name.startswith("models/") else m.name
+            if "gemini" in name.lower():
+                st.session_state['gemini_model_name'] = name
+                return name
+    except Exception:
+        pass
+
+    # Absolute fallback
+    st.session_state['gemini_model_name'] = "gemini-2.5-flash"
+    return "gemini-2.5-flash"
+
 
 def _call_gemini(client, prompt):
-    """Try generating content with fallback model names. Returns (text, error)."""
-    last_error = None
-    for model_name in GEMINI_MODELS:
+    """Call Gemini using the auto-detected model. Returns (text, error)."""
+    model_name = _detect_gemini_model(client)
+    try:
+        response = client.models.generate_content(
+            model=model_name,
+            contents=prompt
+        )
+        return response.text.strip(), None
+    except Exception as e:
+        # If detected model fails, clear cache and try once more with re-detection
+        st.session_state.pop('gemini_model_name', None)
+        model_name = _detect_gemini_model(client)
         try:
             response = client.models.generate_content(
                 model=model_name,
                 contents=prompt
             )
             return response.text.strip(), None
-        except Exception as e:
-            last_error = f"Model '{model_name}': {type(e).__name__}: {e}"
-            continue
-    return None, last_error
+        except Exception as e2:
+            return None, f"Model '{model_name}': {type(e2).__name__}: {e2}"
 
 
 def generate_gemini_verdict_reasoning(client, verdict_label, ensemble_prob, model_prob,
@@ -440,9 +480,11 @@ with st.sidebar:
     if gemini_api_key and GEMINI_AVAILABLE:
         try:
             gemini_client = genai.Client(api_key=gemini_api_key)
-            st.success("✅ Gemini AI connected")
-        except Exception:
-            st.error("❌ Invalid API key")
+            # Auto-detect the correct model for this API key
+            detected_model = _detect_gemini_model(gemini_client)
+            st.success(f"✅ Gemini AI connected (model: `{detected_model}`)")
+        except Exception as e:
+            st.error(f"❌ Failed to connect: {e}")
     elif not GEMINI_AVAILABLE:
         st.warning("⚠️ google-genai package not installed")
     else:
