@@ -879,8 +879,10 @@ if uploaded_file:
             fig_emb, ax_emb = plt.subplots(figsize=(10, 3.5))
             plt.style.use('dark_background')
             emb_feats = deep_feats[0]
+            # Set a small baseline height (1.5) for zero activations so they are visible as neat blue ticks at the bottom
+            display_feats = np.array([1.5 if v <= 0.05 else v for v in emb_feats])
             colors = ['#bf616a' if v > np.percentile(emb_feats, 90) else '#ebcb8b' if v > np.percentile(emb_feats, 50) else '#5e81ac' for v in emb_feats]
-            ax_emb.bar(range(len(emb_feats)), emb_feats, color=colors, edgecolor='none', width=0.8)
+            ax_emb.bar(range(len(emb_feats)), display_feats, color=colors, edgecolor='none', width=0.8)
             ax_emb.set_xlabel("Embedding Dimension Index")
             ax_emb.set_ylabel("Activation Value")
             ax_emb.set_title("Neural Activation Signature Vector", fontsize=12, pad=10)
