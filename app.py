@@ -290,6 +290,25 @@ def compute_heuristic_suspicion(metrics):
 # ─────────────────────────────────────────────────────────
 # 6. Gemini AI Dynamic Analysis Engine
 # ─────────────────────────────────────────────────────────
+# Try multiple model names in case one is unavailable for the user's region/key
+GEMINI_MODELS = ["gemini-2.0-flash", "gemini-1.5-flash", "gemini-1.5-flash-latest"]
+
+def _call_gemini(client, prompt):
+    """Try generating content with fallback model names. Returns (text, error)."""
+    last_error = None
+    for model_name in GEMINI_MODELS:
+        try:
+            response = client.models.generate_content(
+                model=model_name,
+                contents=prompt
+            )
+            return response.text.strip(), None
+        except Exception as e:
+            last_error = f"Model '{model_name}': {type(e).__name__}: {e}"
+            continue
+    return None, last_error
+
+
 def generate_gemini_verdict_reasoning(client, verdict_label, ensemble_prob, model_prob,
                                        heuristic_prob, metrics, audit_details):
     """Generates a dynamic, context-aware verdict explanation using Gemini."""
@@ -301,12 +320,12 @@ def generate_gemini_verdict_reasoning(client, verdict_label, ensemble_prob, mode
 
 An audio sample was just analyzed by our detection system. Here are the results:
 
-**FINAL VERDICT: {verdict_label}**
+FINAL VERDICT: {verdict_label}
 - Combined Spoof Probability: {ensemble_prob*100:.1f}%
 - Neural Model Spoof Probability: {model_prob*100:.1f}%
 - Acoustic Heuristic Suspicion Score: {heuristic_prob*100:.1f}%
 
-**Raw Acoustic Measurements:**
+Raw Acoustic Measurements:
 - Fundamental Pitch (F0): mean={metrics['pitch_mean']:.1f} Hz, std={metrics['pitch_std']:.2f} Hz
 - Spectral Flatness: {metrics['spectral_flatness_mean']:.6f}
 - MFCC Temporal Variance: {metrics['mfcc_var_mean']:.3f}
@@ -316,19 +335,15 @@ An audio sample was just analyzed by our detection system. Here are the results:
 - RMS Energy: mean={metrics['rms_mean']:.4f}, std={metrics['rms_std']:.4f}
 - Audio Duration: {metrics['duration_sec']:.2f} seconds
 
-**Diagnostic Flag Summary:**
+Diagnostic Flag Summary:
 {flags_summary}
 
 Based on these actual measurements, write a clear 3-4 sentence forensic reasoning paragraph explaining WHY this audio was classified as {verdict_label}. Reference the specific metric values that most influenced the decision. Use plain language that a university student can understand. Do NOT use markdown formatting, just plain text."""
 
-    try:
-        response = client.models.generate_content(
-            model="gemini-2.0-flash",
-            contents=prompt
-        )
-        return response.text.strip()
-    except Exception as e:
-        return None
+    text, error = _call_gemini(client, prompt)
+    if error:
+        st.session_state['gemini_last_error'] = error
+    return text
 
 
 def generate_gemini_feature_explanation(client, feature_name, feature_value, feature_status):
@@ -345,14 +360,10 @@ In exactly 2-3 sentences, explain:
 
 Use plain, conversational language. Do NOT use markdown formatting."""
 
-    try:
-        response = client.models.generate_content(
-            model="gemini-2.0-flash",
-            contents=prompt
-        )
-        return response.text.strip()
-    except Exception:
-        return None
+    text, error = _call_gemini(client, prompt)
+    if error:
+        st.session_state['gemini_last_error'] = error
+    return text
 
 
 def generate_gemini_section_description(client, section_name, context_info):
@@ -364,14 +375,10 @@ Context: {context_info}
 
 Write exactly 2-3 sentences explaining what this visualization shows and why it matters for detecting deepfake voices. A first-year university student should understand it. Be concise and informative. Do NOT use markdown formatting."""
 
-    try:
-        response = client.models.generate_content(
-            model="gemini-2.0-flash",
-            contents=prompt
-        )
-        return response.text.strip()
-    except Exception:
-        return None
+    text, error = _call_gemini(client, prompt)
+    if error:
+        st.session_state['gemini_last_error'] = error
+    return text
 
 
 # Fallback static descriptions (used when Gemini API is unavailable)
@@ -565,7 +572,10 @@ if uploaded_file:
             else:
                 fallback_key = "verdict_spoof" if is_ai else "verdict_bonafide"
                 st.info(FALLBACK_DESCRIPTIONS[fallback_key])
-                if not gemini_client:
+                if gemini_client:
+                    gemini_err = st.session_state.get('gemini_last_error', 'Unknown error')
+                    st.warning(f"⚠️ Gemini API call failed — showing built-in analysis instead.\n\n**Error:** `{gemini_err}`")
+                else:
                     st.caption("💡 _Add a Gemini API key in the sidebar to get AI-generated analysis tailored to this specific audio sample._")
 
             st.markdown("---")
